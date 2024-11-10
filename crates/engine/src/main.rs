@@ -9,7 +9,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowAttributes, WindowId};
 
-use tracing::debug;
+use tracing::{debug, error, warn};
 
 pub fn default<T: Default>() -> T {
     T::default()
@@ -18,6 +18,7 @@ pub fn default<T: Default>() -> T {
 struct RenderContext {
     instance: Arc<wgpu::Instance>,
     surface: Arc<wgpu::Surface<'static>>,
+    adapter: Arc<wgpu::Adapter>,
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
 }
@@ -26,12 +27,14 @@ impl RenderContext {
     pub fn new(
         instance: wgpu::Instance,
         surface: wgpu::Surface<'static>,
+        adapter: wgpu::Adapter,
         device: wgpu::Device,
         queue: wgpu::Queue,
     ) -> Self {
         Self {
             instance: Arc::new(instance),
             surface: Arc::new(surface),
+            adapter: Arc::new(adapter),
             device: Arc::new(device),
             queue: Arc::new(queue),
         }
@@ -51,6 +54,10 @@ impl ApplicationHandler for App {
                 .create_window(WindowAttributes::default())
                 .unwrap(),
         );
+
+        let window_size = window.inner_size();
+
+        debug!(size = ?window_size, "window created");
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
@@ -80,7 +87,7 @@ impl ApplicationHandler for App {
                     label: Some("raytrace-device"),
                     required_features: wgpu::Features::PUSH_CONSTANTS,
                     // TODO(hack3rmann): require better limits as needed
-                    required_limits: wgpu::Limits::downlevel_defaults(),
+                    required_limits: default(),
                     memory_hints: wgpu::MemoryHints::Performance,
                 },
                 None,
@@ -88,7 +95,6 @@ impl ApplicationHandler for App {
             .block_on()
             .unwrap();
 
-        let window_size = window.inner_size();
         let surface_config = surface
             .get_default_config(&adapter, window_size.width, window_size.height)
             .unwrap();
@@ -96,14 +102,15 @@ impl ApplicationHandler for App {
         surface.configure(&device, &surface_config);
 
         self.window.replace(window);
-        self.render_context
-            .replace(RenderContext::new(instance, surface, device, queue));
+        self.render_context.replace(RenderContext::new(
+            instance, surface, adapter, device, queue,
+        ));
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
-                debug!("Closing window and exiting event loop");
+                debug!("closing window and exiting event loop");
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
@@ -115,10 +122,12 @@ impl ApplicationHandler for App {
 
                 'render: {
                     let Some(context) = self.render_context.as_ref() else {
+                        warn!("no render context to draw with");
                         break 'render;
                     };
 
                     let Ok(cur_texture) = context.surface.get_current_texture() else {
+                        error!("no next swapchain texture");
                         break 'render;
                     };
 
@@ -131,6 +140,21 @@ impl ApplicationHandler for App {
                 // applications which do not always need to. Applications that redraw continuously
                 // can render here instead.
                 self.window.as_ref().unwrap().request_redraw();
+            }
+            WindowEvent::Resized(size) => 'event: {
+                let Some(context) = self.render_context.as_ref() else {
+                    break 'event;
+                };
+
+                let Some(config) =
+                    context
+                        .surface
+                        .get_default_config(&context.adapter, size.width, size.height)
+                else {
+                    break 'event;
+                };
+
+                context.surface.configure(&context.device, &config);
             }
             _ => (),
         }
