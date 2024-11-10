@@ -1,9 +1,13 @@
 #![allow(dead_code)]
 
+use std::borrow::Cow;
 use std::error::Error;
 use std::sync::Arc;
 
+use bytemuck::{Pod, Zeroable};
+use glam::*;
 use pollster::FutureExt as _;
+use wgpu::util::DeviceExt as _;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -131,6 +135,142 @@ impl ApplicationHandler for App {
                         break 'render;
                     };
 
+                    let view = cur_texture.texture.create_view(&default());
+                    let mut encoder = context.device.create_command_encoder(&default());
+
+                    {
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("rainbow-triangle"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                            occlusion_query_set: None,
+                            timestamp_writes: None,
+                        });
+
+                        #[repr(C)]
+                        #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+                        struct Vertex {
+                            position: Vec2,
+                            color: Vec3,
+                        }
+
+                        let vertices = [
+                            Vertex {
+                                position: Vec2::new(-0.5, -0.5),
+                                color: Vec3::X,
+                            },
+                            Vertex {
+                                position: Vec2::new(0.5, -0.5),
+                                color: Vec3::Y,
+                            },
+                            Vertex {
+                                position: Vec2::new(0.0, 0.5),
+                                color: Vec3::Z,
+                            },
+                        ];
+
+                        let vertex_buffer =
+                            context
+                                .device
+                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    contents: bytemuck::cast_slice(&vertices),
+                                    label: None,
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                });
+
+                        let pipeline_layout = context.device.create_pipeline_layout(
+                            &wgpu::PipelineLayoutDescriptor {
+                                label: None,
+                                bind_group_layouts: &[],
+                                push_constant_ranges: &[],
+                            },
+                        );
+
+                        let vertex_shader =
+                            context
+                                .device
+                                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                                    label: None,
+                                    source: wgpu::ShaderSource::Glsl {
+                                        shader: Cow::Borrowed(include_str!(
+                                            "../assets/shaders/triangle-vertex.glsl"
+                                        )),
+                                        stage: wgpu::naga::ShaderStage::Vertex,
+                                        defines: default(),
+                                    },
+                                });
+
+                        let fragment_shader =
+                            context
+                                .device
+                                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                                    label: None,
+                                    source: wgpu::ShaderSource::Glsl {
+                                        shader: Cow::Borrowed(include_str!(
+                                            "../assets/shaders/triangle-fragment.glsl"
+                                        )),
+                                        stage: wgpu::naga::ShaderStage::Fragment,
+                                        defines: default(),
+                                    },
+                                });
+
+                        let pipeline = context.device.create_render_pipeline(
+                            &wgpu::RenderPipelineDescriptor {
+                                label: None,
+                                layout: Some(&pipeline_layout),
+                                vertex: wgpu::VertexState {
+                                    module: &vertex_shader,
+                                    entry_point: Some("main"),
+                                    compilation_options: default(),
+                                    buffers: &[wgpu::VertexBufferLayout {
+                                        array_stride: std::mem::size_of::<Vertex>() as u64,
+                                        step_mode: wgpu::VertexStepMode::Vertex,
+                                        attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x3],
+                                    }],
+                                },
+                                fragment: Some(wgpu::FragmentState {
+                                    module: &fragment_shader,
+                                    entry_point: Some("main"),
+                                    compilation_options: default(),
+                                    targets: &[Some(wgpu::ColorTargetState {
+                                        format: cur_texture.texture.format(),
+                                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                                        write_mask: wgpu::ColorWrites::ALL,
+                                    })],
+                                }),
+                                cache: None,
+                                primitive: wgpu::PrimitiveState {
+                                    topology: wgpu::PrimitiveTopology::TriangleList,
+                                    strip_index_format: None,
+                                    front_face: wgpu::FrontFace::Ccw,
+                                    cull_mode: Some(wgpu::Face::Back),
+                                    unclipped_depth: false,
+                                    polygon_mode: wgpu::PolygonMode::Fill,
+                                    conservative: false,
+                                },
+                                depth_stencil: None,
+                                multisample: wgpu::MultisampleState {
+                                    count: 1,
+                                    mask: !0,
+                                    alpha_to_coverage_enabled: false,
+                                },
+                                multiview: None,
+                            },
+                        );
+
+                        pass.set_pipeline(&pipeline);
+                        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                        pass.draw(0..vertices.len() as u32, 0..1);
+                    }
+
+                    context.queue.submit([encoder.finish()]);
                     cur_texture.present();
                 };
 
