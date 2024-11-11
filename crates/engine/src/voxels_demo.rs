@@ -1,6 +1,7 @@
 use crate::context::*;
 use crate::octree::Chunk;
 use crate::util::default;
+use bytemuck::{Pod, Zeroable};
 use glam::*;
 use naga::ShaderStage;
 use std::borrow::Cow;
@@ -8,6 +9,13 @@ use std::num::NonZeroU64;
 use tracing::error;
 use wgpu::util::{BufferInitDescriptor, DeviceExt as _};
 use wgpu::*;
+
+#[repr(C)]
+#[derive(Clone, Debug, Default, PartialEq, Copy, Pod, Zeroable)]
+struct PushConst {
+    pub viewport_size: UVec2,
+    pub render_texture_size: UVec2,
+}
 
 pub struct VoxelsDemo {
     pub context: RenderContext,
@@ -18,6 +26,8 @@ pub struct VoxelsDemo {
 }
 
 impl VoxelsDemo {
+    pub const RENDER_TEXTURE_SIZE: UVec2 = UVec2::new(1024, 512);
+
     pub fn new(context: RenderContext) -> Self {
         let chunk = Chunk::new_sphere();
 
@@ -34,8 +44,8 @@ impl VoxelsDemo {
             mip_level_count: 1,
             sample_count: 1,
             size: Extent3d {
-                width: 1024,
-                height: 1024,
+                width: Self::RENDER_TEXTURE_SIZE.x,
+                height: Self::RENDER_TEXTURE_SIZE.y,
                 depth_or_array_layers: 1,
             },
             usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
@@ -80,7 +90,7 @@ impl VoxelsDemo {
                 bind_group_layouts: &[&binds_layout],
                 push_constant_ranges: &[PushConstantRange {
                     stages: ShaderStages::COMPUTE,
-                    range: 0..std::mem::size_of::<UVec2>() as u32,
+                    range: 0..std::mem::size_of::<PushConst>() as u32,
                 }],
             });
 
@@ -152,8 +162,18 @@ impl VoxelsDemo {
 
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &bind, &[]);
-            pass.set_push_constants(0, bytemuck::bytes_of(&viewport_size));
-            pass.dispatch_workgroups(viewport_size.x / 8, viewport_size.y / 8, 1);
+            pass.set_push_constants(
+                0,
+                bytemuck::bytes_of(&PushConst {
+                    viewport_size,
+                    render_texture_size: Self::RENDER_TEXTURE_SIZE,
+                }),
+            );
+            pass.dispatch_workgroups(
+                Self::RENDER_TEXTURE_SIZE.x / 16,
+                Self::RENDER_TEXTURE_SIZE.y / 16,
+                1,
+            );
         }
 
         {

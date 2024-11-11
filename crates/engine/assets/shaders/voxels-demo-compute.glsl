@@ -1,6 +1,6 @@
 #version 450 core
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(std430, binding = 0) readonly buffer Voxels {
     uint colors[];
@@ -8,7 +8,10 @@ layout(std430, binding = 0) readonly buffer Voxels {
 
 layout(rgba8, binding = 1) uniform image2D screen;
 
-layout(push_constant) uniform uvec2 viewport_size;
+layout(push_constant) uniform struct Config {
+    uvec2 viewport_size;
+    uvec2 render_texture_size;
+} config;
 
 const float PI = 3.1415926535;
 
@@ -38,100 +41,51 @@ struct RaytraceResult {
 };
 
 RaytraceResult raytrace(vec3 origin, vec3 direction, float max_distance) {
-    float px = origin.x;
-    float py = origin.y;
-    float pz = origin.z;
-
-    float dx = direction.x;
-    float dy = direction.y;
-    float dz = direction.z;
-
     float t = 0.0;
-    int ix = int(px);
-    int iy = int(py);
-    int iz = int(pz);
+    ivec3 int_pos = ivec3(origin);
+    ivec3 step = ivec3(sign(direction));
 
-    int stepx = (dx > 0.0) ? 1 : -1;
-    int stepy = (dy > 0.0) ? 1 : -1;
-    int stepz = (dz > 0.0) ? 1 : -1;
+    vec3 tdelta = abs(1.0 / direction);
+    vec3 dist = ((step + 1) / 2) * (int_pos - origin + 1)
+            + (1 - (step + 1) / 2) * (origin - int_pos);
 
-    float infinity = uintBitsToFloat(0x7F800000);
-
-    float tx_delta = (dx == 0.0) ? infinity : abs(1.0 / dx);
-    float ty_delta = (dy == 0.0) ? infinity : abs(1.0 / dy);
-    float tz_delta = (dz == 0.0) ? infinity : abs(1.0 / dz);
-
-    float xdist = (stepx > 0) ? (ix + 1 - px) : (px - ix);
-    float ydist = (stepy > 0) ? (iy + 1 - py) : (py - iy);
-    float zdist = (stepz > 0) ? (iz + 1 - pz) : (pz - iz);
-
-    float tx_max = (tx_delta < infinity) ? tx_delta * xdist : infinity;
-    float ty_max = (ty_delta < infinity) ? ty_delta * ydist : infinity;
-    float tz_max = (tz_delta < infinity) ? tz_delta * zdist : infinity;
-
+    vec3 tmax = dist * tdelta;
+    vec3 pos = origin;
     int stepped_index = -1;
 
-    vec3 pos = origin;
-
     while (t <= max_distance) {
-        vec4 color = get_voxel_color(ivec3(ix, iy, iz));
-        pos = vec3(px + t * dx, py + t * dy, pz + t * dz);
+        vec4 color = get_voxel_color(int_pos);
+        pos = origin + t * direction;
 
         if (vec4(0.0) != color) {
-            vec3 normal = vec3(0.0f);
+            vec3 mask = vec3(stepped_index == 0, stepped_index == 1, stepped_index == 2);
+            vec3 normal = -mask * step;
 
-            switch (stepped_index) {
-                case 0:
-                {
-                    normal.x = -stepx;
-                    break;
-                }
-                case 1:
-                {
-                    normal.y = -stepy;
-                    break;
-                }
-                case 2:
-                {
-                    normal.z = -stepz;
-                    break;
-                }
-                default:
-                {
-                    break;
-                }
-            }
-
-            return RaytraceResult(
-                color,
-                pos,
-                normal,
-                true
-            );
+            return RaytraceResult(color, pos, normal, true);
         }
 
-        if (tx_max < ty_max) {
-            if (tx_max < tz_max) {
-                ix += stepx;
-                t = tx_max;
-                tx_max += tx_delta;
+        if (tmax.x < tmax.y) {
+            if (tmax.x < tmax.z) {
+                int_pos.x += step.x;
+                t = tmax.x;
+                tmax.x += tdelta.x;
                 stepped_index = 0;
             } else {
-                iz += stepz;
-                t = tz_max;
-                tz_max += tz_delta;
+                int_pos.z += step.z;
+                t = tmax.z;
+                tmax.z += tdelta.z;
                 stepped_index = 2;
             }
         } else {
-            if (ty_max < tz_max) {
-                iy += stepy;
-                t = ty_max;
-                ty_max += ty_delta;
+            if (tmax.y < tmax.z) {
+                int_pos.y += step.y;
+                t = tmax.y;
+                tmax.y += tdelta.y;
                 stepped_index = 1;
             } else {
-                iz += stepz;
-                t = tz_max;
-                tz_max += tz_delta;
+                int_pos.z += step.z;
+                t = tmax.z;
+                tmax.z += tdelta.z;
                 stepped_index = 2;
             }
         }
@@ -150,10 +104,9 @@ vec3 spherical_to_cartesian(vec3 coords) {
 
 void main() {
     ivec2 index = ivec2(gl_GlobalInvocationID.xy);
-    vec4 color = vec4(vec2(index) / 1024.0, 0.0, 1.0);
 
-    float aspect_ratio = float(viewport_size.y) / float(viewport_size.x);
-    vec2 screen_coord = 2.0 * vec2(index) / vec2(1024.0) - 1.0;
+    float aspect_ratio = float(config.viewport_size.y) / float(config.viewport_size.x);
+    vec2 screen_coord = 2.0 * vec2(index) / vec2(config.render_texture_size - 1) - 1.0;
 
     float camera_vfov = PI / 3.0;
     vec3 camera_target_pos = vec3(0.0);
@@ -175,6 +128,7 @@ void main() {
     RaytraceResult result = raytrace(ray_origin, ray_direction, 100.0);
 
     vec3 light_position = vec3(10.0, 12.0, 16.0);
+    vec4 color;
 
     if (result.has_hit) {
         vec3 to_light_direction = normalize(light_position - result.position);

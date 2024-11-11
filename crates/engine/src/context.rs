@@ -21,11 +21,17 @@ pub struct RenderContext {
 
 impl RenderContext {
     pub fn new(window: &Arc<winit::window::Window>) -> Self {
+        #[cfg(debug_assertions)]
+        let flags = wgpu::InstanceFlags::DEBUG
+            | wgpu::InstanceFlags::VALIDATION
+            | wgpu::InstanceFlags::GPU_BASED_VALIDATION;
+
+        #[cfg(not(debug_assertions))]
+        let flags = wgpu::InstanceFlags::empty();
+
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
-            flags: wgpu::InstanceFlags::DEBUG
-                | wgpu::InstanceFlags::VALIDATION
-                | wgpu::InstanceFlags::GPU_BASED_VALIDATION,
+            flags,
             // TODO(hack3rmann): Support for DirectX12 DCX compiler
             // and ship the program with additional dlls
             dx12_shader_compiler: wgpu::Dx12Compiler::Fxc,
