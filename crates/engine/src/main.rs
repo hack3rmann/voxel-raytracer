@@ -1,12 +1,13 @@
 #![allow(dead_code)]
 
 pub mod context;
+pub mod octree;
 pub mod util;
-
-use std::error::Error;
-use std::sync::Arc;
+pub mod voxels_demo;
 
 use context::RenderContext;
+use std::error::Error;
+use std::sync::Arc;
 use tracing::{debug, error};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -52,7 +53,7 @@ impl ApplicationHandler for App {
                     break 'event;
                 };
 
-                context.draw_demo();
+                crate::voxels_demo::VoxelsDemo::new(context.clone()).draw();
 
                 // Queue a RedrawRequested event.
                 //

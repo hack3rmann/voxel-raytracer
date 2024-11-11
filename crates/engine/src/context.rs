@@ -10,6 +10,7 @@ use winit::dpi::PhysicalSize;
 
 pub use wgpu::{Adapter, Device, Instance, Queue, Surface};
 
+#[derive(Clone)]
 pub struct RenderContext {
     pub instance: Arc<Instance>,
     pub surface: Arc<Surface<'static>>,

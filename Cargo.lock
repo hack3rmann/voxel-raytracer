@@ -378,6 +378,7 @@ dependencies = [
  "error-stack",
  "glam",
  "pollster",
+ "serde",
  "thiserror 2.0.2",
  "tracing",
  "tracing-subscriber",
