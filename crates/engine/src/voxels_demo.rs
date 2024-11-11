@@ -6,6 +6,7 @@ use glam::*;
 use naga::ShaderStage;
 use std::borrow::Cow;
 use std::num::NonZeroU64;
+use std::time::Instant;
 use tracing::error;
 use wgpu::util::{BufferInitDescriptor, DeviceExt as _};
 use wgpu::*;
@@ -15,6 +16,7 @@ use wgpu::*;
 struct PushConst {
     pub viewport_size: UVec2,
     pub render_texture_size: UVec2,
+    pub time: f32,
 }
 
 pub struct VoxelsDemo {
@@ -23,10 +25,11 @@ pub struct VoxelsDemo {
     pub binds_layout: BindGroupLayout,
     pub render_texture: Texture,
     pub buffer: Buffer,
+    pub creation_instant: Instant,
 }
 
 impl VoxelsDemo {
-    pub const RENDER_TEXTURE_SIZE: UVec2 = UVec2::new(1024, 512);
+    pub const RENDER_TEXTURE_SIZE: UVec2 = UVec2::new(4 * 1024, 4 * 512);
 
     pub fn new(context: RenderContext) -> Self {
         let chunk = Chunk::new_sphere();
@@ -120,6 +123,7 @@ impl VoxelsDemo {
             binds_layout,
             render_texture,
             buffer: voxel_buffer,
+            creation_instant: Instant::now(),
         }
     }
 
@@ -167,6 +171,7 @@ impl VoxelsDemo {
                 bytemuck::bytes_of(&PushConst {
                     viewport_size,
                     render_texture_size: Self::RENDER_TEXTURE_SIZE,
+                    time: self.creation_instant.elapsed().as_secs_f32(),
                 }),
             );
             pass.dispatch_workgroups(

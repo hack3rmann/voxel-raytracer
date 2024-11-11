@@ -8,6 +8,7 @@ pub mod voxels_demo;
 use context::RenderContext;
 use std::error::Error;
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::{debug, error};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -18,6 +19,8 @@ use winit::window::{Window, WindowAttributes, WindowId};
 struct App {
     window: Option<Arc<Window>>,
     render_context: Option<RenderContext>,
+    now: Option<Instant>,
+    voxels_demo: Option<crate::voxels_demo::VoxelsDemo>,
 }
 
 impl ApplicationHandler for App {
@@ -32,8 +35,12 @@ impl ApplicationHandler for App {
 
         debug!(size = ?window_size, "window created");
 
-        self.render_context.replace(RenderContext::new(&window));
+        let render_context = RenderContext::new(&window);
+
+        self.voxels_demo.replace(voxels_demo::VoxelsDemo::new(render_context.clone()));
+        self.render_context.replace(render_context);
         self.window.replace(window);
+        self.now.replace(Instant::now());
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -42,18 +49,26 @@ impl ApplicationHandler for App {
                 debug!("closing window and exiting event loop");
                 event_loop.exit();
             }
-            WindowEvent::RedrawRequested => 'event: {
+            WindowEvent::RedrawRequested => {
                 // Redraw the application.
                 //
                 // It's preferable for applications that do not render continuously to render in
                 // this event rather than in AboutToWait, since rendering in here allows
                 // the program to gracefully handle redraws requested by the OS.
 
-                let Some(context) = self.render_context.as_ref() else {
-                    break 'event;
-                };
+                if let Some(voxels_demo) = self.voxels_demo.as_ref() {
+                    voxels_demo.draw();
+                }
 
-                crate::voxels_demo::VoxelsDemo::new(context.clone()).draw();
+                if let Some(prev_instant) = self.now.as_mut() {
+                    let now = Instant::now();
+                    let duration = now - *prev_instant;
+                    let fps = 1.0 / duration.as_secs_f32();
+
+                    debug!(?duration, fps);
+
+                    *prev_instant = now;
+                }
 
                 // Queue a RedrawRequested event.
                 //
