@@ -47,7 +47,8 @@ impl RenderContext {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("raytrace-device"),
-                    required_features: wgpu::Features::PUSH_CONSTANTS,
+                    required_features: wgpu::Features::PUSH_CONSTANTS
+                        | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
                     // TODO(hack3rmann): require better limits as needed
                     required_limits: wgpu::Limits {
                         max_push_constant_size: 128,

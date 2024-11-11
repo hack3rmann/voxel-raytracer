@@ -1,5 +1,5 @@
 use crate::context::*;
-use crate::octree::{Chunk, Color};
+use crate::octree::Chunk;
 use crate::util::default;
 use glam::*;
 use naga::ShaderStage;
@@ -19,7 +19,7 @@ pub struct VoxelsDemo {
 
 impl VoxelsDemo {
     pub fn new(context: RenderContext) -> Self {
-        let chunk = Chunk::all_same(Color::GREEN);
+        let chunk = Chunk::new_sphere();
 
         let voxel_buffer = context.device.create_buffer_init(&BufferInitDescriptor {
             label: Some("voxel-data"),
@@ -64,7 +64,7 @@ impl VoxelsDemo {
                         binding: 1,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
-                            access: StorageTextureAccess::WriteOnly,
+                            access: StorageTextureAccess::ReadWrite,
                             format: TextureFormat::Rgba8Unorm,
                             view_dimension: TextureViewDimension::D2,
                         },
@@ -78,7 +78,10 @@ impl VoxelsDemo {
             .create_pipeline_layout(&PipelineLayoutDescriptor {
                 label: Some("vexels-demo"),
                 bind_group_layouts: &[&binds_layout],
-                push_constant_ranges: &[],
+                push_constant_ranges: &[PushConstantRange {
+                    stages: ShaderStages::COMPUTE,
+                    range: 0..std::mem::size_of::<UVec2>() as u32,
+                }],
             });
 
         let voxels_demo_compute = context.device.create_shader_module(ShaderModuleDescriptor {
@@ -149,6 +152,7 @@ impl VoxelsDemo {
 
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &bind, &[]);
+            pass.set_push_constants(0, bytemuck::bytes_of(&viewport_size));
             pass.dispatch_workgroups(viewport_size.x / 8, viewport_size.y / 8, 1);
         }
 
@@ -326,6 +330,7 @@ impl VoxelsDemo {
         }
 
         self.context.queue.submit([encoder.finish()]);
+
         cur_texture.present();
     }
 }

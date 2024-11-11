@@ -36,6 +36,10 @@ impl Color {
         ]))
     }
 
+    pub const fn rgb8(r: u8, g: u8, b: u8) -> Self {
+        Self(u32::from_le_bytes([r, g, b, 255]))
+    }
+
     pub const fn rgb(r: f32, g: f32, b: f32) -> Self {
         Self::rgba(r, g, b, 1.0)
     }
@@ -73,6 +77,25 @@ impl Chunk {
     pub const fn all_same(color: Color) -> Self {
         Self {
             colors: [color; Self::VOLUME],
+        }
+    }
+
+    pub fn new_sphere() -> Self {
+        Self {
+            colors: std::array::from_fn(|index| {
+                let x = index % Self::SIZE;
+                let yz = index / Self::SIZE;
+                let y = yz % Self::SIZE;
+                let z = yz / Self::SIZE;
+
+                let center = 0.5 * Vec3::splat(Self::SIZE as f32);
+
+                if Vec3::new(x as f32, y as f32, z as f32).distance(center) < 5.0 {
+                    Color::rgb8(20 * x as u8, 20 * y as u8, 20 * z as u8)
+                } else {
+                    Color::TRANSPARENT_BLACK
+                }
+            }),
         }
     }
 }
