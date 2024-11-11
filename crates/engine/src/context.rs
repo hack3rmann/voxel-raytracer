@@ -1,12 +1,12 @@
 use crate::util::default;
+use bytemuck::{Pod, Zeroable};
+use glam::*;
 use pollster::FutureExt as _;
 use std::{borrow::Cow, sync::Arc};
 use thiserror::Error;
-use winit::dpi::PhysicalSize;
-use glam::*;
 use tracing::error;
-use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt as _;
+use winit::dpi::PhysicalSize;
 
 pub use wgpu::{Adapter, Device, Instance, Queue, Surface};
 
@@ -48,7 +48,10 @@ impl RenderContext {
                     label: Some("raytrace-device"),
                     required_features: wgpu::Features::PUSH_CONSTANTS,
                     // TODO(hack3rmann): require better limits as needed
-                    required_limits: default(),
+                    required_limits: wgpu::Limits {
+                        max_push_constant_size: 128,
+                        ..default()
+                    },
                     memory_hints: wgpu::MemoryHints::Performance,
                 },
                 None,
@@ -90,6 +93,11 @@ impl RenderContext {
             return;
         };
 
+        let viewport_size = {
+            let extent = cur_texture.texture.size();
+            UVec2::new(extent.width, extent.height)
+        };
+
         let view = cur_texture.texture.create_view(&default());
         let mut encoder = self.device.create_command_encoder(&default());
 
@@ -118,35 +126,36 @@ impl RenderContext {
 
             let vertices = [
                 Vertex {
-                    position: Vec2::new(-0.5, -0.5),
+                    position: Vec2::new(-0.5, -f32::sqrt(3.0) / 6.0),
                     color: Vec3::X,
                 },
                 Vertex {
-                    position: Vec2::new(0.5, -0.5),
+                    position: Vec2::new(0.5, -f32::sqrt(3.0) / 6.0),
                     color: Vec3::Y,
                 },
                 Vertex {
-                    position: Vec2::new(0.0, 0.5),
+                    position: Vec2::new(0.0, f32::sqrt(3.0) / 3.0),
                     color: Vec3::Z,
                 },
             ];
 
-            let vertex_buffer =
-                self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        contents: bytemuck::cast_slice(&vertices),
-                        label: None,
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
+            let vertex_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    contents: bytemuck::cast_slice(&vertices),
+                    label: None,
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
 
             let pipeline_layout =
-                self
-                    .device
+                self.device
                     .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                         label: None,
                         bind_group_layouts: &[],
-                        push_constant_ranges: &[],
+                        push_constant_ranges: &[wgpu::PushConstantRange {
+                            stages: wgpu::ShaderStages::VERTEX,
+                            range: 0..std::mem::size_of::<UVec2>() as u32,
+                        }],
                     });
 
             let vertex_shader = self
@@ -162,19 +171,18 @@ impl RenderContext {
                     },
                 });
 
-            let fragment_shader =
-                self
-                    .device
-                    .create_shader_module(wgpu::ShaderModuleDescriptor {
-                        label: None,
-                        source: wgpu::ShaderSource::Glsl {
-                            shader: Cow::Borrowed(include_str!(
-                                "../assets/shaders/triangle-fragment.glsl"
-                            )),
-                            stage: wgpu::naga::ShaderStage::Fragment,
-                            defines: default(),
-                        },
-                    });
+            let fragment_shader = self
+                .device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: None,
+                    source: wgpu::ShaderSource::Glsl {
+                        shader: Cow::Borrowed(include_str!(
+                            "../assets/shaders/triangle-fragment.glsl"
+                        )),
+                        stage: wgpu::naga::ShaderStage::Fragment,
+                        defines: default(),
+                    },
+                });
 
             let pipeline = self
                 .device
@@ -221,6 +229,11 @@ impl RenderContext {
                 });
 
             pass.set_pipeline(&pipeline);
+            pass.set_push_constants(
+                wgpu::ShaderStages::VERTEX,
+                0,
+                bytemuck::bytes_of(&viewport_size),
+            );
             pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             pass.draw(0..vertices.len() as u32, 0..1);
         }
